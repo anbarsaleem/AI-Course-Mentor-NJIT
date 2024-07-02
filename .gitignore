@@ -22,6 +22,10 @@ env/
 # Logs
 *.log
 
+# Configuration
+config.json
+*.config.json
+
 # Docker
 *.dockerfile
 docker-compose.yml
