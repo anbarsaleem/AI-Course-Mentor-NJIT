@@ -90,6 +90,6 @@ print(f"Update: {update}")
 print(df_courses.head())
 
 # Save the DataFrame to a CSV file
-df_courses.to_csv('courses.csv', index=False)
+df_courses.to_csv('./course_data/courses.csv', index=False)
 # Save the DataFrame to a JSON file
-df_courses.to_json('courses.json', orient='records', lines=True)
+df_courses.to_json('./course_data/courses.json', orient='records')
