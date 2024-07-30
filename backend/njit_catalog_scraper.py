@@ -1,26 +1,11 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-
-# URLs to scrape
-urls = [
-    "https://catalog.njit.edu/undergraduate/",
-    "https://catalog.njit.edu/graduate/",
-    "https://catalog.njit.edu/programs/"
-]
+from urllib.parse import urljoin
 
 # Directory to save HTML files
-save_dir = "downloaded_html_files"
+save_dir = "data/scraped_data"
 os.makedirs(save_dir, exist_ok=True)
-
-# Extensions to filter
-extensions = [
-    "/architecture-design/",
-    "/computing-sciences/",
-    "/science-liberal-arts/",
-    "/newark-college-engineering/",
-    "/management/"
-]
 
 # Function to get the HTML content from a URL
 def get_html(url):
@@ -35,67 +20,52 @@ def save_html(content, filename):
     with open(filename, 'w', encoding='utf-8') as file:
         file.write(content)
 
-# Function to check if a link should be processed
-def should_process_link(href):
-    for ext in extensions:
-        if href.endswith(ext):
-            return True
-    return False
+# Function to scrape and save HTML from a URL
+def scrape_and_save_html(url, filename):
+    print(f"Fetching page: {url}")
+    content = get_html(url)
+    save_html(content.decode('utf-8'), filename)
+    print(f"Saved: {filename}")
 
-# Function to scrape and save all sub-links HTML for undergraduate and graduate pages
-def scrape_and_save_html(url, filter_links=False):
-    print(f"Fetching main page: {url}")
-    main_html_content = get_html(url)
-    main_soup = BeautifulSoup(main_html_content, 'html.parser')
-    
-    nav_links = main_soup.select("ul.nav a")
-    if not nav_links:
-        print(f"No nav links found on {url}")
+# Function to scrape all sub-links within the main content of a page
+def scrape_sub_links(url, soup, base_url=None):
+    links = soup.select('a[href]')
+    if not links:
+        print(f"No sub-links found on {url}")
         return
-
-    for link in nav_links:
-        sub_url = link.get('href')
-        if not sub_url.startswith('http'):
-            sub_url = 'https://catalog.njit.edu' + sub_url
-        
-        if filter_links and not should_process_link(sub_url):
-            continue
-        
-        print(f"Fetching sub-page: {sub_url}")
-
-        sub_html_content = get_html(sub_url).decode('utf-8')
-        filename = os.path.join(save_dir, sub_url.replace('https://', '').replace('/', '_') + '.html')
-        save_html(sub_html_content, filename)
-        print(f"Saved: {filename}")
-
-# Function to scrape and save HTML for all hrefs within the table on the programs page
-def scrape_and_save_programs_table_html(url):
-    print(f"Fetching programs page: {url}")
-    main_html_content = get_html(url)
-    main_soup = BeautifulSoup(main_html_content, 'html.parser')
     
-    table_links = main_soup.select("table a")
-    if not table_links:
-        print(f"No table links found on {url}")
-        return
-
-    for link in table_links:
+    for link in links:
         sub_url = link.get('href')
-        if not sub_url.startswith('http'):
-            sub_url = 'https://catalog.njit.edu' + sub_url
-        
-        print(f"Fetching table sub-page: {sub_url}")
+        full_url = urljoin(base_url, sub_url) if base_url else sub_url
+        if full_url.startswith('http'):
+            try:
+                sub_html_content = get_html(full_url).decode('utf-8')
+                filename = os.path.join(save_dir, full_url.replace('https://', '').replace('/', '_') + '.html')
+                save_html(sub_html_content, filename)
+                print(f"Saved sub-page: {filename}")
+            except Exception as e:
+                print(f"Failed to scrape sub-link {full_url}: {e}")
 
-        sub_html_content = get_html(sub_url).decode('utf-8')
-        filename = os.path.join(save_dir, sub_url.replace('https://', '').replace('/', '_') + '.html')
-        save_html(sub_html_content, filename)
-        print(f"Saved: {filename}")
+def main():
+    # Read URLs to scrape from file
+    with open('data/links_to_scrape.txt', 'r') as file:
+        urls = [line.strip() for line in file.readlines()]
 
-# Scrape and save HTML for undergraduate and graduate catalogs
-for url in urls[:2]:  # First two URLs are for undergraduate and graduate
-    scrape_and_save_html(url, filter_links=True)
+    # Scrape main pages and their sub-links
+    for url in urls:
+        filename = os.path.join(save_dir, url.replace('https://', '').replace('/', '_') + '.html')
+        try:
+            main_html_content = get_html(url).decode('utf-8')
+            save_html(main_html_content, filename)
+            print(f"Saved main page: {filename}")
+            soup = BeautifulSoup(main_html_content, 'html.parser')
+            scrape_sub_links(url, soup, base_url=url)
+        except Exception as e:
+            print(f"Failed to scrape main page {url}: {e}")
 
-# Scrape and save HTML for programs table
-scrape_and_save_programs_table_html(urls[2])  # Last URL is for programs page
+    # Scrape sub-links for specific pages
+    scrape_sub_links("https://honors.njit.edu/currentstudents/requirements", BeautifulSoup(get_html("https://honors.njit.edu/currentstudents/requirements"), 'html.parser'), "https://honors.njit.edu")
+    scrape_sub_links("https://catalog.njit.edu/undergraduate/academic-policies-procedures/", BeautifulSoup(get_html("https://catalog.njit.edu/undergraduate/academic-policies-procedures/"), 'html.parser'), "https://catalog.njit.edu")
 
-print("HTML files downloaded and saved.")
+if __name__ == "__main__":
+    main()
