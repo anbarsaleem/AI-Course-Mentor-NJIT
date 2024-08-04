@@ -165,9 +165,9 @@ def main():
 
     # Save all courses to a single CSV file
     df_courses = pd.DataFrame(all_courses)
-    csv_file_path = './course_data/all_courses_cleaned_sentences.csv'
-    df_courses.to_csv(csv_file_path, index=False)
-    print("All course data saved to", csv_file_path)
+    json_file_path = './course_data/all_courses_cleaned_sentences.json'
+    df_courses.to_json(json_file_path, orient='records', indent=4)
+    print("All course data saved to", json_file_path)
 
 if __name__ == "__main__":
     main()
