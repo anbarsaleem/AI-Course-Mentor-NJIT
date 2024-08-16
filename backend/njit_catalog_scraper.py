@@ -6,13 +6,47 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import pandas as pd
 import re
+import boto3
+from botocore.exceptions import NoCredentialsError
+from dotenv import load_dotenv
+
+# Load environment variables    
+load_dotenv()
+
+# Get Digital Ocean credentials from environment variables
+DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
+DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET')
+DO_SPACES_REGION = os.getenv('DO_SPACES_REGION', 'nyc3')
+DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
+DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
+
+# Configure the boto3 client
+session = boto3.session.Session()
+client = session.client('s3',
+                        region_name=DO_SPACES_REGION,
+                        endpoint_url=DO_SPACES_ENDPOINT,
+                        aws_access_key_id=DO_SPACES_KEY,
+                        aws_secret_access_key=DO_SPACES_SECRET)
 
 # Directory to save HTML files
-save_dir = "data/scraped_data"
+save_dir = "downloaded_html_files"
 os.makedirs(save_dir, exist_ok=True)
 
+# Function to upload HTML content to Digital Ocean Spaces
+def upload_html_to_spaces(content, object_name):
+    try:
+        client.put_object(
+            Bucket=DO_SPACES_BUCKET,
+            Key=object_name,
+            Body=content,
+            ContentType='text/html'
+        )
+        print(f"Successfully uploaded {object_name} to {DO_SPACES_BUCKET}")
+    except NoCredentialsError:
+        print("Credentials not available")
+
 # Cache directory
-cache_dir = "data/cache"
+cache_dir = "cache"
 os.makedirs(cache_dir, exist_ok=True)
 
 # Function to get the HTML content from a URL
@@ -24,9 +58,9 @@ def get_html(url):
         raise Exception(f"Failed to retrieve content from {url}")
 
 # Function to save HTML content to a file
-def save_html(content, filename):
-    with open(filename, 'w', encoding='utf-8') as file:
-        file.write(content)
+# def save_html(content, filename):
+#     with open(filename, 'w', encoding='utf-8') as file:
+#         file.write(content)
 
 # Function to load HTML content from a file
 def load_html_file(file_path):
@@ -109,16 +143,16 @@ def process_html_with_cache(html_content):
         else:
             return []
 
-# Function to scrape and save HTML from a URL
+# Function to scrape and save HTML from a URL to Digita Ocean Spaces
 def scrape_and_save_html(url, filename):
     print(f"Fetching page: {url}")
     content = get_html(url)
-    save_html(content.decode('utf-8'), filename)
-    print(f"Saved: {filename}")
+    upload_html_to_spaces(content, filename)
 
-def main():
+# Main function to scrape courses
+def scrape_courses():
     # Read URLs to scrape from file
-    with open('data/links_to_scrape.txt', 'r') as file:
+    with open('links_to_scrape.txt', 'r') as file:
         urls = [line.strip() for line in file.readlines()]
 
     all_courses = []
@@ -128,7 +162,7 @@ def main():
         filename = os.path.join(save_dir, url.replace('https://', '').replace('/', '_') + '.html')
         try:
             main_html_content = get_html(url).decode('utf-8')
-            save_html(main_html_content, filename)
+            upload_html_to_spaces(main_html_content, filename)
             print(f"Saved main page: {filename}")
             soup = BeautifulSoup(main_html_content, 'html.parser')
             sub_links = soup.select('a[href]')
@@ -149,7 +183,7 @@ def main():
                     sub_filename = os.path.join(save_dir, full_url.replace('https://', '').replace('/', '_') + '.html')
                     try:
                         sub_html_content = get_html(full_url).decode('utf-8')
-                        save_html(sub_html_content, sub_filename)
+                        upload_html_to_spaces(sub_html_content, sub_filename)
                         print(f"Saved sub-page: {sub_filename}")
                         
                         sub_soup = BeautifulSoup(sub_html_content, 'html.parser')
@@ -163,11 +197,10 @@ def main():
         except Exception as e:
             print(f"Failed to scrape main page {url}: {e}")
 
-    # Save all courses to a single CSV file
+    # Save all courses to a single JSON file
     df_courses = pd.DataFrame(all_courses)
-    json_file_path = './course_data/all_courses_cleaned_sentences.json'
-    df_courses.to_json(json_file_path, orient='records', indent=4)
-    print("All course data saved to", json_file_path)
+    upload_html_to_spaces(df_courses.to_json(), "all_courses.json")
 
+# To ensure compatibility with the backend runner
 if __name__ == "__main__":
-    main()
+    scrape_courses()

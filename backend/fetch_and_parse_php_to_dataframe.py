@@ -1,10 +1,43 @@
-
 import pandas as pd
 import re
+import os
+import boto3
+from botocore.exceptions import NoCredentialsError
+from dotenv import load_dotenv
 import requests
+
+# Load environment variables
+load_dotenv()
+
+# Get Digital Ocean credentials from environment variables
+DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
+DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET')
+DO_SPACES_REGION = os.getenv('DO_SPACES_REGION', 'nyc3')
+DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
+DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
+
+# Configure the boto3 client
+session = boto3.session.Session()
+client = session.client('s3',
+                        region_name=DO_SPACES_REGION,
+                        endpoint_url=DO_SPACES_ENDPOINT,
+                        aws_access_key_id=DO_SPACES_KEY,
+                        aws_secret_access_key=DO_SPACES_SECRET)
 
 # URL of the PHP file
 url = 'https://myhub.njit.edu/scbldr/include/datasvc.php?p=/'
+
+def upload_to_digital_ocean_space(file_content, object_name, content_type):
+    try:
+        client.put_object(
+            Bucket=DO_SPACES_BUCKET,
+            Key=object_name,
+            Body=file_content,
+            ContentType=content_type
+        )
+        print(f"Successfully uploaded {object_name} to {DO_SPACES_BUCKET}")
+    except NoCredentialsError:
+        print("Credentials not available")
 
 # Define a function to fetch and parse the PHP file content into structured data
 def fetch_and_parse_php_file(url):
@@ -40,17 +73,12 @@ def convert_day_to_string(day):
     days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     return days[day-1]
 
-# Fetch and parse the file content
-parsed_data, term, update = fetch_and_parse_php_file(url)
-
-# Define columns for the DataFrame
-columns = [
-    'Course Code', 'Course Name', 'Credits', 'Section Code', 'Section Number', 'CRN',
-    'Enrollment', 'Professor', 'Notes', 'Schedule'
-]
-
 # Define function to convert parsed data to DataFrame
-def convert_to_dataframe(parsed_data):
+def convert_to_dataframe(parsed_data, term, update):
+    columns = [
+        'Course Code', 'Course Name', 'Credits', 'Section Code', 'Section Number', 'CRN',
+        'Enrollment', 'Professor', 'Notes', 'Schedule'
+    ]
     df_data = []
     for course in parsed_data:
         course_code = course[0]
@@ -79,17 +107,20 @@ def convert_to_dataframe(parsed_data):
             ])
     
     df = pd.DataFrame(df_data, columns=columns)
-    return df
+    object_name = f'courses_{term}.json' 
+    upload_to_digital_ocean_space(df.to_json(), object_name, 'application/json')
 
-# Convert parsed data to DataFrame
-df_courses = convert_to_dataframe(parsed_data)
+# Main function to fetch, parse, and save the course data
+def fetch_and_parse_php():
+    # Fetch and parse the file content
+    parsed_data, term, update = fetch_and_parse_php_file(url)
+    
+    # Convert parsed data to DataFrame and upload to Digital Ocean Spaces
+    convert_to_dataframe(parsed_data, term, update)
 
-# Display metadata and DataFrame
-print(f"Term: {term}")
-print(f"Update: {update}")
-print(df_courses.head())
-
-# Save the DataFrame to a CSV file
-df_courses.to_csv('./course_data/courses.csv', index=False)
-# Save the DataFrame to a JSON file
-df_courses.to_json('./course_data/courses.json', orient='records')
+# To ensure compatibility with the backend runner
+if __name__ == "__main__":
+    df_courses, term, update = fetch_and_parse_php()
+    print(f"Term: {term}")
+    print(f"Update: {update}")
+    print(df_courses.head())
