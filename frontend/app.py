@@ -1,5 +1,7 @@
 import streamlit as st
 from openai import OpenAI
+import boto3
+from botocore.exceptions import NoCredentialsError
 from dotenv import load_dotenv
 import os
 import json
@@ -20,6 +22,78 @@ def load_config(config_file="config.json"):
 def save_config(config, config_file="config.json"):
     with open(config_file, "w") as f:
         json.dump(config, f)
+
+# Get Digital Ocean credentials from environment variables
+DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
+DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET')
+DO_SPACES_REGION = os.getenv('DO_SPACES_REGION', 'nyc3')
+DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
+DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
+
+# Configure the boto3 client
+session = boto3.session.Session()
+s3_client = session.client('s3',
+                        region_name=DO_SPACES_REGION,
+                        endpoint_url=DO_SPACES_ENDPOINT,
+                        aws_access_key_id=DO_SPACES_KEY,
+                        aws_secret_access_key=DO_SPACES_SECRET)
+
+prefix = 'course_data/'
+
+def retrieve_files_from_spaces():
+    """
+    Retrieve files from Digital Ocean Spaces.
+    """
+    try:
+        response = s3_client.list_objects_v2(Bucket=DO_SPACES_BUCKET, Prefix=prefix)
+        files = response.get('Contents', [])
+        file_contents = []
+
+        for file in files:
+            file_key = file['Key']
+            file_obj = s3_client.get_object(Bucket=DO_SPACES_BUCKET, Key=file_key)
+            file_content = file_obj['Body'].read()
+            file_contents.append((file_key, file_content))
+
+        return file_contents
+
+    except NoCredentialsError:
+        st.error("Credentials not available")
+        return []
+    
+def refresh_vector_store(config):
+    """
+    Refresh the vector store with the latest course data.
+    """
+    try:
+        # Delete Files from Vector Store
+        files_to_delete = client.beta.vector_stores.files.list(
+            vector_store_id = config.get("vector_store_id")
+        )
+        file_ids = [file.id for file in files_to_delete]
+
+        for file_id in file_ids:
+            client.beta.vector_stores.files.delete(
+                vector_store_id = config.get("vector_store_id"),
+                file_id = file_id
+            )
+
+        # Retrieve Files from Digital Ocean Spaces
+        files = retrieve_files_from_spaces()
+
+        # Upload Files to Vector Store as File Batch
+        file_ids = []
+        for file_content in files:
+            file = client.files.create(file=file_content, purpose="assistants")
+            file_ids.append(file.id)
+        
+        client.beta.vector_stores.file_batches.create(
+            vector_store_id = config.get("vector_store_id"),
+            file_ids = file_ids
+        )
+
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
 
 def check_assistant_exists(assistant_id):
     try:
@@ -108,18 +182,20 @@ def create_assistant_if_needed(config):
 
     return assistant_id
 
-def attach_file_to_assistant(uploaded_file, assistant_id):
-    """
-    Attach the uploaded file to the assistant for processing.
-    """
-    file = client.files.create(file=uploaded_file)
-    client.assistants.update(
-        assistant_id = assistant_id,
-        tool_resources = {"type": "file_search", "file_ids": [file.id]}
-    )
+# def attach_file_to_assistant(uploaded_file, assistant_id):
+#     """
+#     Attach the uploaded file to the assistant for processing.
+#     """
+#     file = client.files.create(file=uploaded_file)
+#     client.assistants.update(
+#         assistant_id = assistant_id,
+#         tool_resources = {"type": "file_search", "file_ids": [file.id]}
+#     )
 
-def start_assistant_thread(prompt):
-    messages = [{"role": "user", "content": prompt}]
+def start_assistant_thread(uploaded_file, prompt):
+    file = client.files.create(file=uploaded_file)
+    updated_prompt = "You have been provided with my transcript. Based on its information, answer the following question: " + prompt
+    messages = [{"role": "user", "content": updated_prompt, "attachments": [file.id]}]
     try:
         thread = client.beta.threads.create(messages=messages)
         return thread.id
@@ -194,7 +270,7 @@ def main():
 
     #Query Assistant
     if uploaded_file is not None:
-        attach_file_to_assistant(uploaded_file, assistant_id)
+        # attach_file_to_assistant(uploaded_file, assistant_id)        
 
         query = st.text_area("Ask a question to receive course mentorship.")
         if query and st.button("Ask"):
@@ -202,7 +278,7 @@ def main():
                 # Call your assistant to process the uploaded file and get course suggestions
                 try:
                     # Start a new thread
-                    thread_id = start_assistant_thread(query)
+                    thread_id = start_assistant_thread(uploaded_file, query)
                     st.session_state.thread_id = thread_id
 
                     # Run the assistant

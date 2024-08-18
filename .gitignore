@@ -54,9 +54,5 @@ docker-compose.override.yml
 # PyCharm
 .idea/
 
-# Ignore specific to your application
-data/
-transcripts/
-scraped_html/
-course_data/
-/backend/downloaded_html_files/
+# Cache files from the backend
+cache/
