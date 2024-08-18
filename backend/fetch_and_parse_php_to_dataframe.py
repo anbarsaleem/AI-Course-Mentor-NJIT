@@ -24,6 +24,8 @@ client = session.client('s3',
                         aws_access_key_id=DO_SPACES_KEY,
                         aws_secret_access_key=DO_SPACES_SECRET)
 
+prefix = 'course_data/'
+
 # URL of the PHP file
 url = 'https://myhub.njit.edu/scbldr/include/datasvc.php?p=/'
 
@@ -31,11 +33,11 @@ def upload_to_digital_ocean_space(file_content, object_name, content_type):
     try:
         client.put_object(
             Bucket=DO_SPACES_BUCKET,
-            Key=object_name,
+            Key=prefix + object_name,
             Body=file_content,
             ContentType=content_type
         )
-        print(f"Successfully uploaded {object_name} to {DO_SPACES_BUCKET}")
+        print(f"Successfully uploaded {object_name} to {DO_SPACES_BUCKET}/{prefix}")
     except NoCredentialsError:
         print("Credentials not available")
 

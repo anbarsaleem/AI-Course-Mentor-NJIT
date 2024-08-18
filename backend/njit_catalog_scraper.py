@@ -28,6 +28,8 @@ client = session.client('s3',
                         aws_access_key_id=DO_SPACES_KEY,
                         aws_secret_access_key=DO_SPACES_SECRET)
 
+prefix = 'course_data/'
+
 # Directory to save HTML files
 save_dir = "downloaded_html_files"
 os.makedirs(save_dir, exist_ok=True)
@@ -37,11 +39,11 @@ def upload_html_to_spaces(content, object_name):
     try:
         client.put_object(
             Bucket=DO_SPACES_BUCKET,
-            Key=object_name,
+            Key=prefix + object_name,
             Body=content,
             ContentType='text/html'
         )
-        print(f"Successfully uploaded {object_name} to {DO_SPACES_BUCKET}")
+        print(f"Successfully uploaded {object_name} to {DO_SPACES_BUCKET}/{prefix}")
     except NoCredentialsError:
         print("Credentials not available")
 
