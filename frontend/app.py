@@ -244,6 +244,11 @@ def main():
     config = load_config()
     assistant_id = create_assistant_if_needed(config)
 
+    # Refresh Vector Store
+    file_contents = retrieve_files_from_spaces()
+    if file_contents:
+        refresh_vector_store(config)
+
     # Page Configuration
     st.set_page_config(
         page_title="NJIT Course Planning Tool",
