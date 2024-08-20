@@ -1,4 +1,5 @@
 import streamlit as st
+import time
 from openai import OpenAI
 import boto3
 from botocore.exceptions import NoCredentialsError
@@ -27,14 +28,14 @@ def save_config(config, config_file="config.json"):
 DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
 DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET')
 DO_SPACES_REGION = os.getenv('DO_SPACES_REGION', 'nyc3')
-DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
+#DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
 DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
 
 # Configure the boto3 client
 session = boto3.session.Session()
 s3_client = session.client('s3',
                         region_name=DO_SPACES_REGION,
-                        endpoint_url=DO_SPACES_ENDPOINT,
+                        endpoint_url='https://nyc3.digitaloceanspaces.com',
                         aws_access_key_id=DO_SPACES_KEY,
                         aws_secret_access_key=DO_SPACES_SECRET)
 
@@ -60,7 +61,7 @@ def retrieve_files_from_spaces():
     except NoCredentialsError:
         st.error("Credentials not available")
         return []
-    
+
 def refresh_vector_store(config):
     """
     Refresh the vector store with the latest course data.
@@ -95,16 +96,29 @@ def refresh_vector_store(config):
     except Exception as e:
         st.error(f"An error occurred: {e}")
 
-def check_assistant_exists(assistant_id):
+def check_vector_store_exists(vector_store_id):
+    if not vector_store_id:
+        return False
     try:
-        response = client.beta.assistants.retrieve(assistant_id)
-        exists = True if response.status_code == 200 else False
+        response = client.beta.vector_stores.retrieve(vector_store_id)
+        exists = True if response else False
         return exists
     except Exception as e:
         return False
 
-def create_assistant_if_needed(config):
+def check_assistant_exists(assistant_id):
+    if not assistant_id:
+        return False
+    try:
+        response = client.beta.assistants.retrieve(assistant_id)
+        exists = True if response else False
+        return exists
+    except Exception as e:
+        return False
+
+def create_resources_if_needed(config):
     assistant_id = config.get("assistant_id")
+    vector_store_id = config.get("vector_store_id")
 
     if not check_assistant_exists(assistant_id):
         course_mentor_assistant = client.beta.assistants.create(
@@ -114,21 +128,21 @@ def create_assistant_if_needed(config):
             instructions="""
                             You are an AI assistant specialized in NJIT course planning. Your task is to provide course recommendations based on a student's major, grad/undergrad status, department, and college, as detailed in their uploaded transcript file. The transcript contains all relevant personal information and is already available to you.
 
-                            Key Guidelines:
+                            # Key Guidelines:
 
-                            Course Level Identification:
+                            ## Course Level Identification:
 
-                            Graduate Courses: Recognize courses with codes in the range of 500-799 as graduate-level courses.
-                            Undergraduate Courses: Recognize courses with codes in the range of 100-499 as undergraduate-level courses.
+                            ### Graduate Courses: Recognize courses with codes in the range of 500-799 as graduate-level courses.
+                            ### Undergraduate Courses: Recognize courses with codes in the range of 100-499 as undergraduate-level courses.
 
-                            Initial Confirmation:
+                            ## Initial Confirmation:
 
                             At the start of the conversation, extract the student's major, college, and program details from the transcript.
                             Accurately insert the extracted information into your response. For example:
                             Correct Response: "According to your transcript, you are a Computer Science major in the College of Computing Sciences program. Please confirm this information by responding with 'Yes' or 'No'."
                             If, for any reason, the AI is unable to retrieve this information, explicitly state that the data could not be found and ask for clarification, rather than presenting vague placeholders.
 
-                            Course Level Prioritization:
+                            ## Course Level Prioritization:
 
                             Strictly prioritize suggesting courses that match the student's academic level as indicated on their transcript:
                             For undergraduate students, recommend only courses with codes in the 100-499 range.
@@ -136,7 +150,7 @@ def create_assistant_if_needed(config):
                             Only suggest courses outside the student's indicated level (e.g., undergraduate courses for a graduate student or vice versa) if the student explicitly requests to consider courses at a different level.
                             If the student indicates a desire to take courses outside their academic level, mention any prerequisites or special permissions that may be required.
 
-                            Data Integrity:
+                            ## Data Integrity:
 
                             Extract all required information directly from the transcript.
                             Never infer or guess any details; rely solely on the provided data.
@@ -144,7 +158,7 @@ def create_assistant_if_needed(config):
                             Cross-reference course availability with the courses.json file for the upcoming semester.
                             Ensure your recommendations are strictly accurate, avoiding courses not listed in the courses.json file.
 
-                            Course Recommendations:
+                            ## Course Recommendations:
 
                             Avoid recommending courses the student has already completed and passed.
                             Prioritize courses that fulfill major, college, or program requirements.
@@ -156,20 +170,20 @@ def create_assistant_if_needed(config):
                             If honors courses are not offered in the upcoming semester, recommend courses based on the student's honors group and indicate that these are not currently offered.
                             Note that if a student has taken an honors course with a corresponding lab course, only one counts toward their honors requirements.
 
-                            Accuracy in Communication:
+                            ## Accuracy in Communication:
 
                             Begin the conversation by verifying the student's major, college, and program data based on the transcript. Ask them to confirm this information.
                             Do not suggest courses not found in the courses.json file, and if a course is missing, mention that it's not currently offered in the upcoming semester.
                             Provide comprehensive lists of relevant courses when asked, ensuring nothing is omitted.
                             Avoid referencing courses based on the course catalog HTML files when discussing upcoming semester offerings.
 
-                            Student Interaction:
+                            ## Student Interaction:
 
                             Be polite, supportive, and realistic about course requirements.
                             Seek clarification only when the necessary information is genuinely not available in the provided documents.
                             If a course aligns with student preferences but is less useful for graduation, highlight this in your response.
 
-                            Response Accuracy:
+                            ## Response Accuracy:
 
                             Internally generate three possible answers, evaluate each against the provided data, and respond with the most accurate and complete response.
                             If the answer cannot be found in the provided data, respond with "The answer could not be found in the provided context.
@@ -177,25 +191,37 @@ def create_assistant_if_needed(config):
             tools = [{"type": "file_search"}],
         )
         assistant_id = course_mentor_assistant.id
-        config["assistant_id"] = assistant_id
-        save_config(config)
 
-    return assistant_id
+    if not check_vector_store_exists(vector_store_id):
+        vector_store = client.beta.vector_stores.create(name="NJIT Course Data")
+        vector_store_id = vector_store.id
 
-# def attach_file_to_assistant(uploaded_file, assistant_id):
-#     """
-#     Attach the uploaded file to the assistant for processing.
-#     """
-#     file = client.files.create(file=uploaded_file)
-#     client.assistants.update(
-#         assistant_id = assistant_id,
-#         tool_resources = {"type": "file_search", "file_ids": [file.id]}
-#     )
+        refresh_vector_store(config)
+    
+    course_mentor_assistant = client.beta.assistants.update(
+        assistant_id=assistant_id,
+        tool_resources={"file_search":  {"vector_store_ids": [vector_store_id]}},
+    )
+    
+    config["vector_store_id"] = vector_store_id
+    config["assistant_id"] = assistant_id
+    
+    save_config(config)
+
+    return assistant_id, vector_store_id
 
 def start_assistant_thread(uploaded_file, prompt):
-    file = client.files.create(file=uploaded_file)
+    file = client.files.create(file=uploaded_file, purpose="assistants")
     updated_prompt = "You have been provided with my transcript. Based on its information, answer the following question: " + prompt
-    messages = [{"role": "user", "content": updated_prompt, "attachments": [file.id]}]
+    tools = [{"type": "file_search"}]
+
+    # Create the message with the content and the file attached using the tools array
+    updated_prompt = "You have been provided with my transcript. Based on its information, answer the following question: " + prompt
+    messages = [{
+        "role": "user",
+        "content": updated_prompt,
+        "attachments": [{"file_id": file.id, "tools": tools}]
+    }] 
     try:
         thread = client.beta.threads.create(messages=messages)
         return thread.id
@@ -206,7 +232,7 @@ def retrieve_thread(thread_id):
     try:
         thread_messages = client.beta.threads.messages.list(thread_id)
         list_messages = thread_messages.data
-        thread_messages = {}
+        thread_messages = []
         for message in list_messages:
             obj = {}
             obj["role"] = message.role
@@ -242,7 +268,7 @@ def main():
         return
     
     config = load_config()
-    assistant_id = create_assistant_if_needed(config)
+    assistant_id, vector_store_id = create_resources_if_needed(config)
 
     # Refresh Vector Store
     file_contents = retrieve_files_from_spaces()
@@ -276,16 +302,18 @@ def main():
     #Query Assistant
     if uploaded_file is not None:
         # attach_file_to_assistant(uploaded_file, assistant_id)        
-
+        thread_id = st.session_state.get("thread_id", None)
         query = st.text_area("Ask a question to receive course mentorship.")
-        if query and st.button("Ask"):
+        if query:
             with st.spinner('Generating answer...'):
                 # Call your assistant to process the uploaded file and get course suggestions
                 try:
-                    # Start a new thread
-                    thread_id = start_assistant_thread(uploaded_file, query)
-                    st.session_state.thread_id = thread_id
-
+                    if thread_id == None:
+                        # Start a new thread
+                        thread_id = start_assistant_thread(uploaded_file, query)
+                        st.session_state.thread_id = thread_id
+                    else:
+                        add_message_to_thread(thread_id, query)
                     # Run the assistant
                     run_id = run_assistant(thread_id, assistant_id)
                     st.session_state.run_id = run_id
@@ -294,8 +322,10 @@ def main():
                     status = check_run_status(thread_id, run_id)
                     st.session_state.status = status
 
-                    while st.session_state.status != "complete":
-                        st.session_state.status = check_run_status(thread_id, run_id)
+                    while st.session_state.status != "completed":
+                        with st.spinner('Generating answer...'):
+                            time.sleep(30)
+                            st.session_state.status = check_run_status(thread_id, run_id)
 
                     # Store conversation
                     if 'chat_history' not in st.session_state:
