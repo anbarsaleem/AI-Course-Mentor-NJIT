@@ -1,3 +1,6 @@
+import logging
+import cProfile
+import pstats
 import os
 import requests
 import hashlib
@@ -34,6 +37,25 @@ prefix = 'course_data/'
 save_dir = "downloaded_html_files"
 os.makedirs(save_dir, exist_ok=True)
 
+# Set up logging configuration
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[logging.FileHandler('njit_catalog_scraper.log', 'w', 'utf-8')])
+
+logger = logging.getLogger(__name__)
+
+# Function to profile
+def profile(func):
+    def wrapper(*args, **kwargs):
+        profile = cProfile.Profile()
+        profile.enable()
+        result = func(*args, **kwargs)
+        profile.disable()
+        stats = pstats.Stats(profile).sort_stats('cumulative')
+        stats.print_stats()
+        return result
+    return wrapper
+
 # Function to upload HTML content to Digital Ocean Spaces
 def upload_html_to_spaces(content, object_name):
     try:
@@ -43,9 +65,11 @@ def upload_html_to_spaces(content, object_name):
             Body=content,
             ContentType='text/html'
         )
-        print(f"Successfully uploaded {object_name} to {DO_SPACES_BUCKET}/{prefix}")
+        logger.info(f"Successfully uploaded {object_name} to {DO_SPACES_BUCKET}/{prefix}")
     except NoCredentialsError:
-        print("Credentials not available")
+        logger.info("Credentials not available", exc_info=True)
+    except Exception as e:
+        logger.error(f"Failed to upload {object_name} to {DO_SPACES_BUCKET}/{prefix}", exc_info=True)
 
 # Cache directory
 cache_dir = "cache"
@@ -53,38 +77,58 @@ os.makedirs(cache_dir, exist_ok=True)
 
 # Function to get the HTML content from a URL
 def get_html(url):
-    response = requests.get(url)
-    if response.status_code == 200:
+    logger.debug(f"Fetching content from {url}")
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        logger.info(f"Successfully fetched content from {url}")
         return response.content
-    else:
-        raise Exception(f"Failed to retrieve content from {url}")
-
-# Function to save HTML content to a file
-# def save_html(content, filename):
-#     with open(filename, 'w', encoding='utf-8') as file:
-#         file.write(content)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to fetch content from {url}", exc_info=True)
+        raise
 
 # Function to load HTML content from a file
 def load_html_file(file_path):
-    with open(file_path, 'r', encoding='utf-8') as file:
-        return file.read()
+    logger.debug(f"Loading content from {file_path}")
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        logger.info(f"Successfully loaded content from {file_path}")
+        return content
+    except Exception as e:
+        logger.error(f"Failed to load content from {file_path}", exc_info=True)
+        raise
 
 # Function to hash content
 def hash_content(content):
+    logger.debug("Hashing content")
     return hashlib.md5(content.encode()).hexdigest()
 
 # Function to cache results
 def cache_results(file_path, results):
-    with open(file_path, 'wb') as f:
-        pickle.dump(results, f)
+    logger.debug(f"Caching results to {file_path}")
+    try:
+        with open(file_path, 'wb') as f:
+            pickle.dump(results, f)
+        logger.info(f"Successfully cached results to {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to cache results to {file_path}", exc_info=True)
 
 # Function to load cached results
 def load_cached_results(file_path):
-    with open(file_path, 'rb') as f:
-        return pickle.load(f)
+    logger.debug(f"Loading cached results from {file_path}")
+    try:        
+        with open(file_path, 'rb') as f:
+            return pickle.load(f)
+        logger.info(f"Successfully loaded cached results from {file_path}")
+        return results
+    except Exception as e:
+        logger.error(f"Failed to load cached results from {file_path}", exc_info=True)
+        raise
 
 # Function to extract course information manually with improved parsing to handle full sentences for prerequisites, corequisites, and restrictions
 def extract_course_info_with_cleaned_sentences(course_blocks):
+    logger.debug("Extracting course information with cleaned sentences")
     courses = []
     prereq_pattern = re.compile(r'Prerequisites?:\s*(.*?)(?:\.|$)', re.IGNORECASE)
     coreq_pattern = re.compile(r'Corequisites?:\s*(.*?)(?:\.|$)', re.IGNORECASE)
@@ -128,80 +172,99 @@ def extract_course_info_with_cleaned_sentences(course_blocks):
                 'corequisites': corequisites,
                 'restrictions': restrictions
             })
+    logger.info("Successfully extracted course information with cleaned sentences")
     return courses
 
 # Function to process HTML with caching
 def process_html_with_cache(html_content):
+    logger.debug("Processing HTML with caching")
     cache_file = os.path.join(cache_dir, f"cache_{hash_content(html_content)}.pkl")
     if os.path.exists(cache_file):
+        logger.info(f"Loading cached results from {cache_file}")
         return load_cached_results(cache_file)
     else:
         soup = BeautifulSoup(html_content, 'html.parser')
         course_blocks = soup.find_all('div', class_='courseblock')
         if course_blocks:
+            logger.info(f"Extracting course information from {len(course_blocks)} course blocks")
             courses = extract_course_info_with_cleaned_sentences(course_blocks)
             cache_results(cache_file, courses)
             return courses
         else:
+            logger.error("No course blocks found in HTML content")
             return []
 
-# Function to scrape and save HTML from a URL to Digita Ocean Spaces
+# Function to scrape and save HTML from a URL to Digital Ocean Spaces
 def scrape_and_save_html(url, filename):
-    print(f"Fetching page: {url}")
-    content = get_html(url)
-    upload_html_to_spaces(content, filename)
+    logger.debug(f"Scraping and saving HTML from {url} to {filename} on Digital Ocean Spaces")    
+    try:
+        content = get_html(url) 
+        upload_html_to_spaces(content, filename)
+        logger.info(f"Successfully scraped and saved HTML from {url} to {filename} on Digital Ocean Spaces")
+    except Exception as e:
+        logger.error(f"Failed to scrape and save HTML from {url} to {filename} on Digital Ocean Spaces", exc_info=True)
 
 # Main function to scrape courses
 def scrape_courses():
-    # Read URLs to scrape from file
-    with open('links_to_scrape.txt', 'r') as file:
-        urls = [line.strip() for line in file.readlines()]
+    logger.info("Starting course scraping process")
+    try:
+        # Read URLs to scrape from file
+        with open('links_to_scrape.txt', 'r') as file:
+            urls = [line.strip() for line in file.readlines()]
+        logger.info(f"Read {len(urls)} URLs to scrape")
 
-    all_courses = []
+        all_courses = []
 
-    # Scrape main pages and their sub-links
-    for url in urls:
-        filename = os.path.join(save_dir, url.replace('https://', '').replace('/', '_') + '.html')
-        try:
-            main_html_content = get_html(url).decode('utf-8')
-            upload_html_to_spaces(main_html_content, filename)
-            print(f"Saved main page: {filename}")
-            soup = BeautifulSoup(main_html_content, 'html.parser')
-            sub_links = soup.select('a[href]')
-            base_url = url
+        # Scrape main pages and their sub-links
+        for url in urls:
+            filename = os.path.join(save_dir, url.replace('https://', '').replace('/', '_') + '.html')
+            try:
+                logger.debug(f"Scraping main page: {url}")
+                main_html_content = get_html(url).decode('utf-8')
+                upload_html_to_spaces(main_html_content, filename)
+                logger.info(f"Saved main page: {filename}")
+                
+                soup = BeautifulSoup(main_html_content, 'html.parser')
+                sub_links = soup.select('a[href]')
+                base_url = url
+                
+                # Process and cache course information if available
+                if soup.find('div', id='coursestextcontainer'):
+                    processed_courses = process_html_with_cache(main_html_content)
+                    all_courses.extend(processed_courses)
+                else:
+                    logger.warning(f"No course content found on {url}")
+                
+                # Scrape sub-links
+                for link in sub_links:
+                    sub_url = link.get('href')
+                    full_url = urljoin(base_url, sub_url)
+                    if full_url.startswith('http'):
+                        sub_filename = os.path.join(save_dir, full_url.replace('https://', '').replace('/', '_') + '.html')
+                        try:
+                            logger.debug(f"Scraping sub-page: {full_url}")
+                            sub_html_content = get_html(full_url).decode('utf-8')
+                            upload_html_to_spaces(sub_html_content, sub_filename)
+                            logger.info(f"Saved sub-page: {sub_filename}")
+                            
+                            sub_soup = BeautifulSoup(sub_html_content, 'html.parser')
+                            if sub_soup.find('div', id='coursestextcontainer'):
+                                processed_sub_courses = process_html_with_cache(sub_html_content)
+                                all_courses.extend(processed_sub_courses)
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to scrape sub-link {full_url}: {e}")
             
-            # Process and cache course information if available
-            if soup.find('div', id='coursestextcontainer'):
-                processed_courses = process_html_with_cache(main_html_content)
-                all_courses.extend(processed_courses)
-            else:
-                print(f"No course content found on {url}")
-            
-            # Scrape sub-links
-            for link in sub_links:
-                sub_url = link.get('href')
-                full_url = urljoin(base_url, sub_url)
-                if full_url.startswith('http'):
-                    sub_filename = os.path.join(save_dir, full_url.replace('https://', '').replace('/', '_') + '.html')
-                    try:
-                        sub_html_content = get_html(full_url).decode('utf-8')
-                        upload_html_to_spaces(sub_html_content, sub_filename)
-                        print(f"Saved sub-page: {sub_filename}")
-                        
-                        sub_soup = BeautifulSoup(sub_html_content, 'html.parser')
-                        if sub_soup.find('div', id='coursestextcontainer'):
-                            processed_sub_courses = process_html_with_cache(sub_html_content)
-                            all_courses.extend(processed_sub_courses)
-                        
-                    except Exception as e:
-                        print(f"Failed to scrape sub-link {full_url}: {e}")
-        
-        except Exception as e:
-            print(f"Failed to scrape main page {url}: {e}")
+            except Exception as e:
+                logger.error(f"Failed to scrape main page {url}: {e}")
 
-    # Save all courses to a single JSON file
-    df_courses = pd.DataFrame(all_courses)
-    upload_html_to_spaces(df_courses.to_json(), "all_courses.json")
+        # Save all courses to a single JSON file
+        logger.debug("Saving all courses to JSON file")
+        df_courses = pd.DataFrame(all_courses)
+        upload_html_to_spaces(df_courses.to_json(), "all_courses.json")
+        logger.info("Successfully saved all courses to DigitalOcean Space")
+    except Exception as e:
+        logger.error("An error occurred during the course scraping process", exc_info=True)
 
 # To ensure compatibility with the backend runner
 if __name__ == "__main__":
