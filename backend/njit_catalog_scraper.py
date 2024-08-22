@@ -11,6 +11,8 @@ import pandas as pd
 import re
 import boto3
 from botocore.exceptions import NoCredentialsError
+from threading import Lock
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
 # Load environment variables    
@@ -37,10 +39,13 @@ prefix = 'course_data/'
 save_dir = "downloaded_html_files"
 os.makedirs(save_dir, exist_ok=True)
 
+all_courses = [] # List to store all courses
+lock = Lock() # Lock to ensure thread safety when writing to the shared all_courses list
+
 # Set up logging configuration
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[logging.FileHandler('njit_catalog_scraper.log', 'w', 'utf-8')])
+                    handlers=[logging.FileHandler('multithreaded_njit_catalog_scraper.log', 'w', 'utf-8')])
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +209,52 @@ def scrape_and_save_html(url, filename):
     except Exception as e:
         logger.error(f"Failed to scrape and save HTML from {url} to {filename} on Digital Ocean Spaces", exc_info=True)
 
+def scrape_link(url):
+    filename = os.path.join(save_dir, url.replace('https://', '').replace('/', '_') + '.html')
+    try:
+        logger.debug(f"Scraping main page: {url}")
+        main_html_content = get_html(url).decode('utf-8')
+        upload_html_to_spaces(main_html_content, filename)
+        logger.info(f"Saved main page: {filename}")
+        
+        soup = BeautifulSoup(main_html_content, 'html.parser')
+        sub_links = soup.select('a[href]')
+        base_url = url
+        
+        # Process and cache course information if available
+        if soup.find('div', id='coursestextcontainer'):
+            processed_courses = process_html_with_cache(main_html_content)
+            with lock: # Ensure only one thread is writing to the shared all_courses list at a time
+                all_courses.extend(processed_courses)
+        else:
+            logger.warning(f"No course content found on {url}")
+        
+        # Scrape sub-links
+        for link in sub_links:
+            sub_url = link.get('href')
+            full_url = urljoin(base_url, sub_url)
+            if full_url.startswith('http'):
+                sub_filename = os.path.join(save_dir, full_url.replace('https://', '').replace('/', '_') + '.html')
+                try:
+                    logger.debug(f"Scraping sub-page: {full_url}")
+                    sub_html_content = get_html(full_url).decode('utf-8')
+                    upload_html_to_spaces(sub_html_content, sub_filename)
+                    logger.info(f"Saved sub-page: {sub_filename}")
+                    
+                    sub_soup = BeautifulSoup(sub_html_content, 'html.parser')
+                    if sub_soup.find('div', id='coursestextcontainer'):
+                        processed_sub_courses = process_html_with_cache(sub_html_content)
+                        with lock:
+                            all_courses.extend(processed_sub_courses)
+
+                except Exception as e:
+                    logger.error(f"Failed to scrape sub-link {full_url}: {e}")
+    
+    except Exception as e:
+        logger.error(f"Failed to scrape main page {url}: {e}")
+
 # Main function to scrape courses
-def scrape_courses():
+def main():
     logger.info("Starting course scraping process")
     try:
         # Read URLs to scrape from file
@@ -213,51 +262,12 @@ def scrape_courses():
             urls = [line.strip() for line in file.readlines()]
         logger.info(f"Read {len(urls)} URLs to scrape")
 
-        all_courses = []
-
-        # Scrape main pages and their sub-links
-        for url in urls:
-            filename = os.path.join(save_dir, url.replace('https://', '').replace('/', '_') + '.html')
-            try:
-                logger.debug(f"Scraping main page: {url}")
-                main_html_content = get_html(url).decode('utf-8')
-                upload_html_to_spaces(main_html_content, filename)
-                logger.info(f"Saved main page: {filename}")
-                
-                soup = BeautifulSoup(main_html_content, 'html.parser')
-                sub_links = soup.select('a[href]')
-                base_url = url
-                
-                # Process and cache course information if available
-                if soup.find('div', id='coursestextcontainer'):
-                    processed_courses = process_html_with_cache(main_html_content)
-                    all_courses.extend(processed_courses)
-                else:
-                    logger.warning(f"No course content found on {url}")
-                
-                # Scrape sub-links
-                for link in sub_links:
-                    sub_url = link.get('href')
-                    full_url = urljoin(base_url, sub_url)
-                    if full_url.startswith('http'):
-                        sub_filename = os.path.join(save_dir, full_url.replace('https://', '').replace('/', '_') + '.html')
-                        try:
-                            logger.debug(f"Scraping sub-page: {full_url}")
-                            sub_html_content = get_html(full_url).decode('utf-8')
-                            upload_html_to_spaces(sub_html_content, sub_filename)
-                            logger.info(f"Saved sub-page: {sub_filename}")
-                            
-                            sub_soup = BeautifulSoup(sub_html_content, 'html.parser')
-                            if sub_soup.find('div', id='coursestextcontainer'):
-                                processed_sub_courses = process_html_with_cache(sub_html_content)
-                                all_courses.extend(processed_sub_courses)
-                            
-                        except Exception as e:
-                            logger.error(f"Failed to scrape sub-link {full_url}: {e}")
-            
-            except Exception as e:
-                logger.error(f"Failed to scrape main page {url}: {e}")
-
+        # Scrape main pages and their sub-links with multithreading
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(scrape_link, url) for url in urls]
+            for future in as_completed(futures):
+                future.result()      
+        
         # Save all courses to a single JSON file
         logger.debug("Saving all courses to JSON file")
         df_courses = pd.DataFrame(all_courses)
@@ -268,4 +278,4 @@ def scrape_courses():
 
 # To ensure compatibility with the backend runner
 if __name__ == "__main__":
-    scrape_courses()
+    main()
