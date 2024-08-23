@@ -12,7 +12,7 @@ import pstats
 from html_templates import bot_template, user_template, css
 
 # Load environment variables
-load_dotenv(dotenv_path='../.env')
+load_dotenv(dotenv_path='../.env', override=True)
 client = OpenAI()
 
 # Global variables for vector store and assistant
@@ -37,12 +37,10 @@ def profile(func):
         stats.print_stats()
         return result
     return wrapper
-
 # Get Digital Ocean credentials from environment variables
 DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
 DO_SPACES_SECRET = os.getenv('DO_SPACES_SECRET')
 DO_SPACES_REGION = os.getenv('DO_SPACES_REGION', 'nyc3')
-#DO_SPACES_ENDPOINT = os.getenv('DO_SPACES_ENDPOINT', 'https://nyc3.digitaloceanspaces.com')
 DO_SPACES_BUCKET = os.getenv('DO_SPACES_BUCKET')
 
 # Configure the boto3 client

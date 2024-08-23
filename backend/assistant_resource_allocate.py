@@ -9,7 +9,7 @@ import logging
 import json
 
 # Load environment variables
-load_dotenv()
+load_dotenv(dotenv_path='../.env', override=True)
 client = OpenAI()
 
 file_contents = [] # List of file contents retrieved from Digital Ocean Spaces

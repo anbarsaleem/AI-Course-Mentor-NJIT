@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import requests
 
 # Load environment variables
-load_dotenv(dotenv_path='../.env')
+load_dotenv(dotenv_path='../.env', override=True)
 
 # Get Digital Ocean credentials from environment variables
 DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
