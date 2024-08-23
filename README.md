@@ -27,15 +27,18 @@ An OpenAI GPT-powered assistant that provides curated course advice for NJIT stu
 
 ### Clone the Repository
 
-````bash
+```bash
 git clone https://github.com/anbarsaleem/AI-Course-Mentor-NJIT.git
 cd AI-Course-Mentor-NJIT
+```
 
 ### Setup Environment Variables
+
 1. Copy the .env.example file to .env in the project root:
+
 ```bash
 cp .env.example .env
-````
+```
 
 2. Edit .env to include your OpenAI and DigitalOcean credentials.
 
