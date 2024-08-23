@@ -12,7 +12,7 @@ import pstats
 from html_templates import bot_template, user_template, css
 
 # Load environment variables
-load_dotenv()
+load_dotenv(dotenv_path='../.env')
 client = OpenAI()
 
 # Global variables for vector store and assistant

@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
 # Load environment variables    
-load_dotenv()
+load_dotenv(dotenv_path='../.env')
 
 # Get Digital Ocean credentials from environment variables
 DO_SPACES_KEY = os.getenv('DO_SPACES_KEY')
