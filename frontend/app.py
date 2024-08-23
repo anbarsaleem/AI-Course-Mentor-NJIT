@@ -69,7 +69,7 @@ def retrieve_ids_from_spaces():
         return None, None
     except Exception as e:
         logger.error(f"An error occurred: {e}")
-        raise None, None
+        return None, None
 
 def start_assistant_thread(uploaded_file, prompt):
     logger.info(f"Starting Assistant Thread with Transcript attached")
@@ -141,6 +141,7 @@ def main():
         layout="centered",
         initial_sidebar_state="expanded",
     )
+    st.write(css, unsafe_allow_html=True)
     logger.info("Configured Streamlit Page")
 
     if not openai_api_key:
