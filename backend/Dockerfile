@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app
 
 # Define the command to run the backend script
-CMD ["python", "scraper.py"]
+CMD ["python", "backend_runner.py"]
