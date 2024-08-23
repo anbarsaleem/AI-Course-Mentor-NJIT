@@ -107,9 +107,13 @@ def convert_to_dataframe(parsed_data, term, update):
                 course_code, course_name, credits, section_code, section_number, crn,
                 enrollment, professor, notes, "; ".join(schedule)
             ])
+        # Add term and update information
+        df_data.append(['', '', '', '', '', '', '', '', '', ''])
+        df_data.append(['Term:', term, '', '', '', '', '', '', '', ''])
+        df_data.append(['Last Updated:', update, '', '', '', '', '', '', '', ''])
     
     df = pd.DataFrame(df_data, columns=columns)
-    object_name = f'courses_{term}.json' 
+    object_name = f'upcoming_semester_courses.json' 
     upload_to_digital_ocean_space(df.to_json(), object_name, 'application/json')
 
 # Main function to fetch, parse, and save the course data

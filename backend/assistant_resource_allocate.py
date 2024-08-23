@@ -13,7 +13,7 @@ load_dotenv(dotenv_path='../.env', override=True)
 client = OpenAI()
 
 file_contents = [] # List of file contents retrieved from Digital Ocean Spaces
-file_ids = [] # List of file ids to be uploaded to Vector Store
+upload_file_ids = [] # List of file ids to be uploaded to Vector Store
 lock = Lock()
 
 # Set up logging configuration
@@ -111,7 +111,7 @@ def create_vector_store_file(vector_store_id, file_content):
     try:
         file = client.files.create(file=file_content, purpose="assistants")
         with lock:
-            file_ids.append(file.id)
+            upload_file_ids.append(file.id)
         logger.info(f"Created file in Vector Store: {file.id}")
     except Exception as e:
         logger.error(f"An error occurred: {e}")
@@ -127,10 +127,10 @@ def refresh_vector_store(vector_store_id):
         files_to_delete = client.beta.vector_stores.files.list(
             vector_store_id = vector_store_id
         )
-        file_ids = [file.id for file in files_to_delete]
+        delete_file_ids = [file.id for file in files_to_delete]
 
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(delete_file_from_vector_store, vector_store_id, file_id) for file_id in file_ids]
+            futures = [executor.submit(delete_file_from_vector_store, vector_store_id, file_id) for file_id in delete_file_ids]
             for future in as_completed(futures):
                 future.result()
         logger.info("Deleted files from Vector Store")
@@ -147,9 +147,9 @@ def refresh_vector_store(vector_store_id):
         
         client.beta.vector_stores.file_batches.create(
             vector_store_id = vector_store_id,
-            file_ids = file_ids
+            file_ids = upload_file_ids
         )
-        logger.info(f"Uploaded files to Vector Store, {file_ids}")
+        logger.info(f"Uploaded files to Vector Store, {upload_file_ids}")
 
     except Exception as e:
         logger.error(f"An error occurred: {e}")
@@ -259,7 +259,7 @@ def create_resources_if_needed(config):
         vector_store = client.beta.vector_stores.create(name="NJIT Course Data")
         vector_store_id = vector_store.id
         config["vector_store_id"] = vector_store_id
-        refresh_vector_store(vector_store_id)
+    refresh_vector_store(vector_store_id)
     
     course_mentor_assistant = client.beta.assistants.update(
         assistant_id=assistant_id,
