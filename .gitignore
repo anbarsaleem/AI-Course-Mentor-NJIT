@@ -26,11 +26,6 @@ env/
 config.json
 *.config.json
 
-# Docker
-*.dockerfile
-docker-compose.yml
-docker-compose.override.yml
-
 # Digital Ocean
 .do_env
 .do_secrets
